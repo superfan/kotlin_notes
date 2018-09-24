@@ -259,3 +259,135 @@ println(listOf(l, 2, 3, 4).asSequence().map { it * it }.find { it > 3 })
 * 在集合上执行操作的顺序也会影响性能。
 ![](20180912145710.png)
 
+#### 创建序列
+
+* generateSequence函数，给定序列中的前一个元素，这个函数会计算出下一个元素。
+```
+val naturalNumbers = generateSequence(O) { it + 1 }
+val numbersTolOO = naturalNumbers.takeWhile { it <= 100 }
+println(numbersTolOO.sum()) // 5050
+```
+* 注意，这个例子中naturalNumbers和numbersTolOO都是有延期操作的序列。直到末端操作(sum)时才会求值。
+* 创建并使用父目录的序列
+```
+fun File.isinsideHiddenDirectory() = 
+    generateSequence(this) { it.parentFile }.any { it.isHidden }
+```
+
+## 使用Java函数式接口
+
+* kotlin的lambda可以无缝地和java api互操作。
+```
+button.setOnClickListener { view -> ... }
+```
+* OnClickListener接口只有一个抽象方法，称为函数式接口，或者SAM接口(SAM代表单抽象方法)。
+
+#### 把lambda当作参数传递给java方法
+
+```
+/* java */
+void postponeComputation(int delay, Runnable computation);
+/* kotlin */
+// 方式一: 编译器会自动把它转换成一个Runnable的实例(一个实现了Runable接口的匿名类的实例)。
+postponeComputation(lOOO) { println(42) }
+// 方式二: 通过显式地创建一个实现了Runnable的匿名对象
+postponeComputation(1000, object : Runnable {
+    override fun run() {
+        println(42)
+    }
+})
+// 方法三: 把Runnable实例存储在一个变量中，并且每次调用这个变量。
+val runnable = Runnable { println(42) }
+fun handleComputation() {
+    postponeComputation(1000, runnable)
+}
+```
+* 当显式地声明对象时，每次调用都会创建一个新的实例。使用lambda的情况不同，如果lambda没有访问任何来自定义它的函数的变量，相应的匿名实例可以在多次调用之间重用。如果lambda从包围它的作用域中捕捉了变量，每次调用就不再重用同一个实例。
+![lambda的实现细节](20180918150506.png)
+* 注意: 这里讨论的lambda创建一个匿名类，以及该类的实例的方式只对期望函数式接口的java方法有效，但是对集合使用kotlin扩展方法的方式并不适用。如果把lambda传给了标记成inline的kotlin函数，是不会创建任何匿名类的，而大多数的库函数都标记成了inline。
+
+#### SAM构造方法
+
+* SAM构造方法是编译器生成的函数，让你执行从lambda到函数式接口实例的显式转换。可以在编译器不会自动应用转换的上下文中使用。如果有一个方法返回的是一个函数式接口的实例，不能直接返回一个lambda，要用SAM构造方法把它包装起来。
+```
+fun createAllDoneRunnable() : Runnable {
+    return Runnable { println("All done!") }
+}
+createAllDoneRunnable().run()
+```
+* SAM构造方法的名称和底层函数式接口的名称一样。SAM构造方法只接收一个参数(一个被用作函数式接口单抽象方法体的lambda)并返回实现了这个接口的类的一个实例。
+* SAM构造方法还可以用在需要把从lambda生成的函数式接口实例存储在一个变量中。
+![lambda](20180919131902.png)
+
+## 带接收者的lambda
+
+#### with函数
+
+```
+// 构造字母表
+fun alphabet(): String {
+    val result = StringBuilder()
+    for (letter in 'A'..'Z') {
+        result.append(letter)
+    }
+    result.append("\nNow I know the alphabet!")
+    return result.toString()
+}
+```
+```
+// 使用with构建字母表
+fun alphabet(): String {
+    val stringBuilder = StringBuilder()
+    return with(stringBuilder) { // 指定接收者
+        for (letter in 'A'..'Z') {
+            this.append(letter) // 显式使用this
+        }
+        append("\nNow I know the alphabet!") // 省略this
+        this.toString()
+    }
+}
+```
+```
+// 使用with和一个表达式函数体来构建字母表
+fun alphabet() = with(stringBuilder()) {
+    for (letter in 'A'..'Z') {
+        append(letter)
+    }
+    append("\nNow I know the alphabet!")
+    toString()
+}
+```
+* with函数接收两个参数: 接收者对象和lambda(在接收者对象上使用)，可以使用或省略this引用。
+![带接收者的lambda 和扩展函数](20180919135346.png)
+
+#### apply函数
+
+* apply函数几乎和with函数一样，唯一的区别是apply始终会返回作为实参传递给它的对象(即接收者对象)。
+```
+fun alphabet() = StringBuilder().apply {
+    for (letter in 'A'..'Z') {
+        append(letter)
+    }
+    append("\nNow I know the alphabet!")
+}.toString()
+```
+* apply被声明成一个扩展函数。它的接收者变成了作为实参的lambda的接收者。执行apply的结果是StringBuilder，所以接下来你可以调用toString把它转换成String。
+* 许多情况下apply都很有效，其中一种是在创建一个对象实例并需要用正确的方式初始化它的一些属性的时候。在Java中，这通常是通过另外一个单独的**Builder**对象来完成的。而在Kotlin中，可以在任意对象上使用apply，完全不需要任何来自定义该对象的库的特别支持。
+```
+// 使用apply初始化一个TextView对象
+fun createViewWithCustomAttributes(context: Context) = 
+    TextView(context).apply {
+        text = "Sample Text"
+        textSize = 20 . 0
+        setPadding(10, 0, 0, 0)
+    }
+```
+* 使用标准库函数buildString进一步简化alphabet函数。它会负责创建StringBuilder并调用toString。buildString的实参是一个带接收者的lambda，接收者就是StringBuilder。
+```
+fun alphabet() = buildString {
+    for (letter in 'A'..'Z') {
+        append(letter)
+        append ("\nNow I know the alphabet!")
+    }
+}
+```
