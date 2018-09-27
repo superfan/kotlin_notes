@@ -309,3 +309,176 @@ foo(42) // 编译器认为42是一个长整型
 ```
 * Kotlin算术运算符关于数值范围溢出的行为和Java完全一致: Kotlin并没有引入由溢出检查带来的额外开销。
 ![](20180921072730.png)
+
+
+#### "Any"和"Any?": 根类型
+
+* 在java中，Object只是所有引用类型的超类(或根类)，而基本数据类型并不是类层级结构的一部分。这意味当需要Object的时候，不得不用java.lang.Integer这样的包装类型来表示基本数据类型的值。在kotlin中，Any是所有类型的超类型(或根类)，包括像Int这样的基本数据类型。
+* 和java一样，把基本数据类型的值赋给Any类型的变量时会自动装箱。
+```
+val answer: Any = 42
+```
+* Any是非空类型，所以Any类型的变量不可以持有null值。在kotlin中如果需要持有任何可能值的变量，包括null在内，必须使用Any?类型。
+* 在底层，Any类型对应java.lang.Object。Kotlin把Java方法参数和返回类型中用到的Object类型看作Any(更确切地是当作平台类型，因为其可空性是未知的)。当Kotlin函数使用Any时，它会被编译成Java字节码中的Object。
+* 所有Kotlin类都包含下面三个方法: toString、equals和hashCode。这些方法都继承自Any。Any并不能使用其他java.lang.Object的方法(比如wait和notify)，但是可以通过手动把值转换成java.lang.Object来调用这些方法。
+
+#### Unit类型: kotlin的"void"
+
+* kotlin中的Unit类型完成了java中的void一样的功能。当函数没什么有意思的结果要返回时，它可以用作函数的返回类型。
+```
+fun f(): Unit { ... }
+// 等价于: 显示的Unit声明被省略了
+fun f() { ... }
+```
+* 如果你的Kotlin函数使用Unit作为返回类型并且没有重写泛型函数，在底层它会被编译成旧的void函数。如果你要在Java代码中重写这个函数，新的Java函数需要返回void。
+```
+interface Processor<T> {
+    fun process(): T
+}
+class NoResultProcessor: Processor<Unit> {
+    override fun process() { // 返回Unit，但可以省略类型说明
+        ... // 这里不需要显式地return，因为编译器会隐式地加上return Unit。
+    }
+}
+```
+* 和Java对比一下，Java中为了解决使用"没有值"作为类型参数的任何一种可能解法，都没有Kotlin的解决方案这样漂亮。一种选择是使用分开的接口定义来分别表示需要和不需要返回值的接口(如Callable和Runnable)。另一种是用特殊的java.lang.Void 类型作为类型参数。即便你选择了后面这种方式，你还是需要加入一个return null；语句来返回唯一能匹配这个类型的值，因为只要返回类型不是void，你就必须始终有显式的return语句。
+
+#### Nothing类型
+
+* 对某些Kotlin函数来说，＂返回类型"的概念没有任何意义，因为它们从来不会成功地结束。例如，许多测试库都有一个叫作fail的函数，它通过抛出带有特定消息的异常来让当前测试失败。一个包含无限循环的函数也永远不会成功地结束。
+* Nothing类型没有任何值，只有被当作函数返回值使用，或者被当作泛型函数返回值的类型参数使用才会有意义。在其他所有情况下，声明一个不能存储任何值的变量没有任何意义。
+* 返回Nothing的函数可以放在Elvis运算符的右边来做先决条件检查。
+```
+val address = company.address ?: fail("No address")
+println(address.city)
+```
+* 上面这个例子展示了在类型系统中拥有Nothing为什么极其有用。编译器知道这种返回类型的函数从不正常终止， 然后在分析调用这个函数的代码时利用这个信息。在上面这个例子中，编译器会把address的类型推断成非空，因为它为null时的分支处理会始终抛出异常。
+
+## 集合与数组
+
+#### 可空性和集合
+
+* 创建一个包含可空值的集合
+```
+fun readNumers(reader: BufferedReader): List<Int?> {
+    val result = ArrayList<Int?>() // 创建包含可空Int值的列表
+    for (line in reader.lineSequence()) {
+        try {
+            val number = list.toInt()
+            result.add(number) // 向列表添加整数(非空值)
+        } catch(e: NumberFormatException) {
+            result.add(null) // 向列表添加null，因为当前行不能被解析成整数
+        }
+    }
+    return result
+}
+```
+* 从kotlin 1.1开始，可以用函数String.toIntOrNull来简化这个例子，字符串不能被解析的时候会返回null。
+* 变量自己类型的可空性和用作类型参数的类型的可空性是有区别的。List<Int?>和List<Int>?，在第一种情况下，列表本身始终不为null，但列表中的每个值都可以为null。第二种类型的变量可能包含空引用而不是列表实例，但列表中的元素保证是非空的。
+```
+fun addValidNumbers(numbers: List<Int?>) {
+    var sumOfValidNumbers = 0
+    var invalidNumbers = 0
+    for (number in numbers) {
+        if (number != null) {
+            sumOfValidNumbers += number
+        } else {
+            invalidNumbers++
+        }
+    }
+    println("Sum of valid numbers: $sum0fValidNumbers") 
+    println("Invalid numbers: $invalidNumbers")
+}
+// 对包含可空值的集合使用filterNotNull
+fun addValidNumbers(numbers: List<Int?>) {
+    val validNumbers = numbers.filterNotNull()
+    println("Sum of valid numbers: ${validNumbers.sum ()}")
+    println("Invalid numbers: ${numbers.size - validNumbers.size}")
+}
+```
+
+#### 只读集合与可变集合
+
+* 只读集合接口: kotlin.collections.Collection。
+* 可变集合接口: kotlin.collections.MutableCollection，继承了kotlin.collections.Collection接口。
+* 使用集合接口时需要牢记的一个关键点是只读集合不一定是不可变的。如果你使用的变量拥有一个只读接口类型，它可能只是同一个集合的众多引用中的一个。任何其他的引用都可能拥有一个可变接口类型。
+![](20180925070529.png)
+* 如果你调用了这样的代码，它持有其他指向你集合的引用，或者并行地运行了这样的代码。你依然会遇到这样的状况，你正在使用集合的时候它被其他代码修改了，这会导致concurrentModificationException错误和其他一些问题。因此，必须了解只读集合并不总是线程安全的。如果你在多线程环境下处理数据，你需要保证代码正确地同步了对数据的访问，或者使用支持并发访问的数据结构。
+
+#### kotlin集合和java
+
+* 每一种java集合接口在kotlin都有两种表示: 一种是只读的，另一种是可变的。
+![](20180925071314.png)
+* 除了集合之外， Kotlin中Map类(它并没有继承Collection或是Iterable)也被表示成了两种不同的版本: Map和MutableMap。
+* 创建不同类型集合的函数。注意，setOf()和mapOf()返回的是Java标准类库中类的实例(至少在Kotlin  1.0中是这样)，在底层它们都是可变的。但你不能完全信赖这一点: Kotlin的未来版本可能会使用真正不可变的实现类作为setOf和mapOf的返回值。
+![](20180925072204.png)
+* 当你需要调用一个Java方法并把集合作为实参传给它时，可以直接这样做，不需要任何额外的步骤。例如，你有一个使用java.util.Collection做形参的Java方法，可以把任意Collection或MutableCollection的值作为实参传递给这个形参。
+* 因为Java并不会区分只读集合与可变集合，即使Kotlin中把集合声明成只读的，Java代码也能够修改这个集合。
+```
+/ * Java */
+// CollectionUtils.java
+public class CollectionUtils {
+    public static List<String> uppercaseAll(List<String> items) {
+        for (int i = O; i < items .size(); i++) {
+            items.set(i, items.get(i).toUpperCase());
+        }
+        return items;
+    }
+}
+// Kotlin
+// collections.kt
+fun printinUppercase(list: List<String>) {
+    println(CollectionUtils.uppercaseAll(list))
+    println(list.first())
+>> val list= listOf("a", "b", "c")
+>> printinUppercase(list)
+[A, B, C]
+A
+```
+* 同样的Java 型一List<String>一如何表示成了两种不同的Kotlin类型:一种是List<String>?(包含字符串的可空列表)，另一种是MutableList<String?>(包含可空字符串的可变列表)。
+
+#### 对象和基本数据类型的数组
+
+* 使用数组。
+```
+fun main(args: Array<String>) {
+    for (i in args.indices) {
+        println("Argument $i is: ${args[i]}")
+    }
+}
+```
+* 创建字符数组。
+```
+val letters = Array<String>(26) { i -> ('a' + i).toString() }
+println(letters.joinToString(""))
+```
+* Kotlin代码中最常见的创建数组的情况之一是需要调用参数为数组的Java方法时，或是调用带有vararg参数的Kotlin函数。
+```
+// 向vararg方法传递集合
+val strings = listOf("a", "b", "c")
+println("%s/%s/%s".format(*strings.toTypedArray())) 
+// 期望vararg参数时，使用展开运算符(*)传递数组
+```
+* 为了表示基本数据类型的数组，Kotlin提供了若干独立的类，每一种基本数据类型都对应一个。例如，Int类型值的数组叫作IntArray。Kotlin还提供了ByteArray、CharArray、BooleanArray等给其他类型。所有这些类型都被编译成普通的Java基本数据类型数组，比如int[]、byte[]、char[]等。因此这些数组中的值存储时并没有装箱，而是使用了可能的最高效的方式。
+* 要创建一个基本数据类型的数组，你有如下选择:
+
+> 该类型的构造方法接收size 参数并返回一个使用对应基本数据类型默认值(通常是0)初始化好的数组。
+
+> 工厂函数(IntArray的intArrayOf，以及其他数组类型的函数)接收变长参数的值并创建存储这些值的数组。
+
+> 另一种构造方法，接收一个大小和一个用来初始化每个元素的lambda。
+
+```
+val fiveZeros = IntArray(5)
+val fiveZerosToo = intArrayOf(0, 0, 0)
+val squares = IntArray(5) { i -> (i + l) * (i + 1) }
+```
+* 除了那些基本操作(获取数组的长度，获取或者设置元素)外， Kotlin标准库支持一套和集合相同的用于数组的扩展函数。第5章中你看到的全部函数(filter、map等)也适用于数组，包括基本数据类型的数组(注意，这些方法的返回值是列表而不是数组)。
+```
+// 对数组使用forEachIndexed
+fun main(args: Array<String>) {
+    args.forEachIndexed { index, element ->
+        println("Argument $index is: $element")
+    }
+}
+```
